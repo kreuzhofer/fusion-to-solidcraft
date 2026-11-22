@@ -7,13 +7,13 @@ those states are often on disk already (an earlier pass wrote them, but the tran
 not pair them), and fetching them again would change nothing. This script:
 
   1. keeps only the designs with at least one state that is not on disk yet,
-  2. writes `_state_wanted.json` for those designs: the new steps plus every state already on disk
-     (ExtractTimeline only keeps states that are on the wanted list),
+  2. writes `_state_wanted.json` for those designs: the new steps plus every state already on disk,
   3. writes `_reextract.txt` with the same designs, one hub path per line (ExtractTimeline's
      SELECT = "list"),
   4. keeps the previous two files with a time stamp, and says what the pass will do.
 
-Then run ExtractTimeline (or fusion/nightloop.py) and translate again. Nothing in Fusion is touched.
+Then run `python3 -I fusion/nightloop.py --select list` (or ExtractTimeline by hand with SELECT = "list")
+and translate again. Nothing in Fusion is touched.
 
     python3 next_pass.py                      # defaults below
     python3 next_pass.py --dry-run            # only say what it would write

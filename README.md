@@ -174,8 +174,8 @@ for a frozen state its file does not hold yet (step 5). A design read again keep
 had. A design whose version or bucket changed since the inventory is listed in the final message
 (and `summary.json`): run InventoryHub again then.
 
-**Unattended (recommended):** install the add-in (`python3 install.py --addin`), set `SELECT`,
-quit Fusion, and in a terminal:
+**Unattended (recommended):** install the add-in (`python3 install.py --addin`), run InventoryHub
+(step 1: the loop counts the work left from the inventory), quit Fusion, and in a terminal:
 
     python3 -I fusion/nightloop.py
 
@@ -250,8 +250,12 @@ translator lists those steps in `state-wanted.json`. Then:
 It keeps the designs with at least one state that is not on disk yet, writes `~/cad/work/_state_wanted.json`
 and `~/cad/work/_reextract.txt` (the previous ones are kept with a time stamp), and says how many
 new states the pass will write. If it says **"nothing new to fetch from Fusion"**, you are done.
-Otherwise set `SELECT = "list"` in ExtractTimeline, run step 3 again (only the listed designs are
-read; states already on disk are kept), then step 4 again, then `next_pass.py` again.
+Otherwise run step 3 again for the listed designs only: unattended with
+
+    python3 -I fusion/nightloop.py --select list
+
+or by hand with `SELECT = "list"` in ExtractTimeline (states already on disk are kept), then step 4
+again, then `next_pass.py` again.
 
 Options: `--dry-run` (only report), `--wanted`, `--timelines`, `--work` (other folders).
 
@@ -275,6 +279,7 @@ import has no history worth keeping and stays geometry only.
 
 | Script | What it does |
 |---|---|
+| `compare_runs.py` | compares two translator runs (`rebuild-report.json`) design by design: grades, designs matching Fusion, what got better or worse; numbers instead of names unless `--names` |
 | `migrate.py` | imports each STEP of step 2 into SolidCraft and compares volume and area with Fusion's (`migration-report.json`); a quick check of the geometry route alone |
 | `build_library.py` | one `.solidcraft` per design by the best route available, and `library.json` saying which |
 | `f3d_inventory.py` | an HTML contact sheet of the F3D previews |

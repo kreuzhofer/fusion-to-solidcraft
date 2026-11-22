@@ -6,6 +6,12 @@ On Windows:               py -I nightloop.py
 Options:                  --mem-cap GB   Fusion memory at which a round stops and Fusion is restarted
                                          (ExtractTimeline's MEM_CAP_GB, 40 by default; lower it on a
                                          machine with less RAM)
+                          --select list  read only the designs in _reextract.txt (a pass of step 5);
+                                         default: every design of the inventory (step 3)
+
+Work left is counted from files, the same way ExtractTimeline decides what to read: a design of the
+inventory (or of the list) without a .timeline.json yet, a file with states pending, and wanted
+states (_state_wanted.json, step 5) that the file does not hold.
 
 Needs the CrosslinkNightRun add-in in Fusion's AddIns folder (it starts ExtractTimeline when a
 request file appears). The loop: start Fusion if it is not running, ask for a run, wait for it to
@@ -25,6 +31,8 @@ WORK = os.path.expanduser("~/cad/work")
 OUT = os.path.expanduser("~/cad/fusion-timeline")
 REQUEST, DONE, ALIVE = (os.path.join(WORK, n) for n in ("_run_request.json", "_run_done.json", "_nightrun_alive.txt"))
 WANTED = os.path.join(WORK, "_state_wanted.json")
+SELECT_LIST = os.path.join(WORK, "_reextract.txt")
+INVENTORY = os.path.expanduser("~/cad/fusion-inventory/inventory.json")
 APP = "Autodesk Fusion"                                             # macOS application name
 WIN_PROCESS = os.environ.get("FUSION_PROCESS", "Fusion360.exe")     # Windows process name
 MAX_ROUNDS = 30
@@ -124,27 +132,51 @@ def end(p, force=False):
         run(["kill", "-KILL" if force else "-TERM", str(p)])
 
 
-def open_designs():
-    """Designs of the wanted list that still need a visit, and state files written so far."""
-    with open(WANTED, encoding="utf-8") as fh:
-        wanted = json.load(fh)
-    left, pending = 0, 0
-    for key in wanted:
-        f = os.path.join(OUT, key + ".timeline.json")
+def _json(path, default):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def scope():
+    """The designs this run is about, as paths under OUT without suffix (None: unknown)."""
+    if SETTINGS.get("SELECT") == "list":
         try:
-            with open(f, encoding="utf-8") as fh:
-                d = json.load(fh)
-            # the same test as ExtractTimeline's states_missing (22 Nov): wanted steps without a
-            # frozen state in the file, not the file's date
-            have = {r.get("index") for r in d.get("timeline") or []
-                    if isinstance(r.get("state_step"), dict) and r["state_step"].get("frozen")}
-            missing = set(int(i) for i in wanted[key]) - have
-            if d.get("states_pending") or missing:
-                left += 1
-                pending += d.get("states_pending") or len(missing)
-        except Exception:
+            with open(SELECT_LIST, encoding="utf-8") as fh:
+                return [ln.strip().replace("\\", "/") for ln in fh if ln.strip()]
+        except OSError:
+            return []
+    inv = _json(INVENTORY, None)
+    if not inv:
+        return None
+    return [r["path"] for r in inv.get("designs", [])
+            if r.get("ext") == "f3d" and r.get("path") and r.get("bucket") != "unreadable"]
+
+
+def open_designs():
+    """(designs that still need a visit, states still to write) -- see the top of this file."""
+    wanted = _json(WANTED, {})
+    keys = scope()
+    if keys is None:
+        keys = list(wanted)
+    else:
+        keys = list(dict.fromkeys(keys + [k for k in wanted if SETTINGS.get("SELECT") != "list" or k in keys]))
+    left, pending = 0, 0
+    for key in keys:
+        d = _json(os.path.join(OUT, key + ".timeline.json"), None)
+        if d is None:
             left += 1
-            pending += len(wanted[key])
+            pending += len(wanted.get(key) or [])
+            continue
+        # the same test as ExtractTimeline's states_missing: wanted steps without a frozen state
+        have = {r.get("index") for r in d.get("timeline") or []
+                if isinstance(r.get("state_step"), dict) and r["state_step"].get("frozen")}
+        missing = set(int(i) for i in wanted.get(key) or []) - have
+        if d.get("states_pending") or missing:
+            left += 1
+            pending += d.get("states_pending") or len(missing)
     return left, pending
 
 
@@ -234,14 +266,23 @@ def main():
     ap = argparse.ArgumentParser(description="Runs ExtractTimeline rounds unattended (see the top of this file).")
     ap.add_argument("--mem-cap", type=float, metavar="GB",
                     help="Fusion memory at which a round stops and Fusion is restarted (default 40)")
+    ap.add_argument("--select", choices=("all", "list"), default="all",
+                    help="list: only the designs in _reextract.txt (a step 5 pass); all: the whole inventory")
     a = ap.parse_args()
+    SETTINGS["SELECT"] = a.select
     if a.mem_cap:
         SETTINGS.update(MEM_CAP_GB=a.mem_cap, MEM_START_GB=round(a.mem_cap * 0.8, 1))
         HARD_CAP_GB = max(a.mem_cap * 1.75, a.mem_cap + 4)
         say("memory cap %.1f GB (no new design above %.1f GB, hard cap %.1f GB)"
             % (a.mem_cap, SETTINGS["MEM_START_GB"], HARD_CAP_GB))
     left, pending = open_designs()
-    say("start: %d designs open, about %d states to write" % (left, pending))
+    if SETTINGS["SELECT"] == "list" and not scope():
+        say("--select list, but %s is missing or empty: run next_pass.py first" % SELECT_LIST)
+        return 1
+    if scope() is None and not os.path.exists(WANTED):
+        say("no inventory (%s) and no wanted list: run InventoryHub first" % INVENTORY)
+        return 1
+    say("start (SELECT %s): %d designs open, about %d states to write" % (SETTINGS["SELECT"], left, pending))
     stuck = 0
     for n in range(1, MAX_ROUNDS + 1):
         if left == 0:
