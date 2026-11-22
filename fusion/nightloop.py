@@ -262,6 +262,7 @@ def one_round(n):
 
 def main():
     global HARD_CAP_GB
+    os.makedirs(WORK, exist_ok=True)
     import argparse
     ap = argparse.ArgumentParser(description="Runs ExtractTimeline rounds unattended (see the top of this file).")
     ap.add_argument("--mem-cap", type=float, metavar="GB",
