@@ -84,11 +84,18 @@ converted on macOS, the grades should match; list every difference.
    forced to stop and Fusion has to be restarted at least once.
 3. Start the loop in a terminal and leave the machine alone:
 
-       py -I fusion\nightloop.py --mem-cap <that cap>
+       py -I fusion\nightloop.py --select list --mem-cap <that cap>
+
+   (`--select list` reads only the designs `next_pass.py` listed in `_reextract.txt`. If `next_pass.py`
+   said there is nothing to fetch, run the loop without `--select list` instead after moving one
+   design's `.timeline.json` out of `%USERPROFILE%\cad\fusion-timeline` (keep it; put it back
+   afterwards): the loop then extracts that design. Either way at least one restart must happen.)
 
    Expected in `%USERPROFILE%\cad\work\_nightloop.log`: "starting Fusion", rounds that end with
    `mem_stop` set, "quitting Fusion", Fusion started again by the loop, and at the end
-   `finished: nothing left to extract`.
+   `finished: nothing left to extract`. Also check that the loop refuses to start without an inventory
+   (rename `inventory.json` for a moment and run it: it must stop with "run InventoryHub first" and not
+   start Fusion).
 4. Run step 5 again and compare the grades with the first conversion.
 
 Report: whether the loop found Fusion's launcher by itself (if not, the path that works, set as
