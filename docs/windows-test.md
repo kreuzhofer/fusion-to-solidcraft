@@ -47,6 +47,16 @@ Run **InventoryHub** in Fusion. Report: run time, the summary (`%USERPROFILE%\ca
 counts per bucket, designs with real work, assemblies, big), and any design that could not be opened.
 If the same hub was inventoried on macOS, the counts must be identical.
 
+**Path length for all designs.** The sample in section 4 extracts only six designs, so check the paths
+the extractor would write for every design now (`.base123.extra.step` is about the longest name it
+adds to a design's path):
+
+    py -c "import json,os; h=os.path.expanduser('~/cad'); d=json.load(open(h+'/fusion-inventory/inventory.json',encoding='utf-8'))['designs']; L=sorted((len(os.path.join(h,'fusion-timeline',*r['path'].split('/')))+len('.base123.extra.step'),r['path']) for r in d if r.get('ext')=='f3d'); print('longest:',L[-1][0],'characters; over 259:',sum(1 for n,_ in L if n>259))"
+
+Report the two numbers (not the path). Anything over 259 characters fails on Windows unless long paths
+are switched on (`LongPathsEnabled`); if there are any, say how many and whether long paths are enabled
+on this machine (`reg query HKLM\SYSTEM\CurrentControlSet\Control\FileSystem /v LongPathsEnabled`).
+
 ## 3. Backup (step 2)
 
 1. Run **ExportAllDesigns**. Report: run time, counts from the final message, `backup-log.txt`.
