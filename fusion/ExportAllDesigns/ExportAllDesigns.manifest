@@ -1,0 +1,8 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "author": "",
+  "description": { "": "Back up every Fusion design as STEP + F3D with a manifest; later runs export only new designs and new versions." },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

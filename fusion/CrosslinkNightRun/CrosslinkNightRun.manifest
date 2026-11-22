@@ -1,0 +1,10 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "author": "Crosslink",
+    "description": { "": "Starts ExtractTimeline when ~/cad/work/_run_request.json appears, so a night of extraction rounds needs nobody at the screen. Remove this folder to switch it off." },
+    "version": "0.1",
+    "runOnStartup": true,
+    "supportedOS": "mac",
+    "editEnabled": true
+}

@@ -1,0 +1,8 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "author": "Crosslink",
+  "description": { "": "List every design in the active hub (and optionally count its timeline features) for the SolidCraft migration." },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
