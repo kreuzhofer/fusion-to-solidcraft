@@ -184,15 +184,21 @@ On Windows the loop starts Fusion with its launcher from `%LOCALAPPDATA%\Autodes
 `Fusion360.exe`. Keep the machine from sleeping while it runs (macOS: `caffeinate -i` in front of
 the command).
 
-The loop starts Fusion, has the add-in start ExtractTimeline, waits, restarts Fusion when the run
-stopped for memory, and ends when nothing is left (`finished: nothing left to extract`), when two
-rounds made no progress, or after 30 rounds. Stop it with Ctrl-C; Fusion is left as it is. Its
-log is `~/cad/work/_nightloop.log`; `status.txt` in `OUT_DIR` names the design being read.
+The loop starts Fusion, has the add-in start ExtractTimeline, waits, and restarts Fusion when the run
+stopped for memory, until nothing is left to extract (`finished: nothing left to extract`). Then it
+goes on with steps 4 and 5 by itself: it quits Fusion, runs the translator (`--all --verify` into
+`~/cad/fusion-rebuild`, `--jobs 4`) and `next_pass.py`, and fetches the states the translator asked
+for, pass after pass, until `next_pass.py` says nothing new is needed (`done: the translator needs
+nothing more from Fusion`). It also stops when two rounds made no progress, when a pass asks for the
+same states as the one before, or after 8 passes (`--max-passes`). `--extract-only` stops after the
+extraction, for doing steps 4 and 5 by hand. Stop it with Ctrl-C; Fusion is left as it is. Its log
+is `~/cad/work/_nightloop.log` (the translator's and next_pass's output: `_nightloop-translate-<n>.log`,
+`_nightloop-next-pass-<n>.log` next to it); `status.txt` in `OUT_DIR` names the design being read.
 
 **By hand:** run ExtractTimeline from Scripts and Add-Ins. If Fusion gets slow or stops at the memory
 cap, quit Fusion, start it again and run the script again.
 
-**Next:** step 4.
+**Next:** step 4 (the loop has done steps 4 and 5 already unless you gave `--extract-only`).
 
 ## 4. Convert: build every design in SolidCraft and check it
 
@@ -250,7 +256,8 @@ translator lists those steps in `state-wanted.json`. Then:
 It keeps the designs with at least one state that is not on disk yet, writes `~/cad/work/_state_wanted.json`
 and `~/cad/work/_reextract.txt` (the previous ones are kept with a time stamp), and says how many
 new states the pass will write. If it says **"nothing new to fetch from Fusion"**, you are done.
-Otherwise run step 3 again for the listed designs only: unattended with
+Otherwise run step 3 again for the listed designs only (the night loop does this by itself; by hand,
+or after `--extract-only`): unattended with
 
     python3 -I fusion/nightloop.py --select list
 

@@ -16,8 +16,10 @@ real hub of 215 designs. Code comments marked `Crosslink <date>` belong to these
   `fusion/common/test_buckets.py` checks it, also against timelines already extracted.
 - **`fusion/CrosslinkNightRun`** (add-in) and **`fusion/nightloop.py`**: unattended extraction. The add-in runs
   ExtractTimeline when a request file appears; the loop outside Fusion asks for rounds, watches Fusion's memory and
-  restarts Fusion between rounds until nothing is left to extract. It counts the work left from the
-  inventory and the wanted list (`--select list` for a pass of step 5, `--mem-cap` for smaller machines).
+  restarts Fusion between rounds until nothing is left to extract, then translates, plans the next pass and
+  fetches the states the translator asked for, until nothing new is needed (`--extract-only` to stop after the
+  extraction). It counts the work left from the inventory and the wanted list (`--select list` for a pass of
+  step 5, `--mem-cap` for smaller machines).
 - **`next_pass.py`**: after a translator run, writes the list of frozen states the next extraction should fetch.
 - **`compare_runs.py`**: compares two translator runs design by design.
 - **`install.py`**: copies the Fusion scripts (and optionally the add-in) into Fusion's API folder on macOS and

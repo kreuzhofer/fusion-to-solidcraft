@@ -94,7 +94,7 @@ converted on macOS, the grades should match; list every difference.
    forced to stop and Fusion has to be restarted at least once.
 3. Start the loop in a terminal and leave the machine alone:
 
-       py -I fusion\nightloop.py --select list --mem-cap <that cap>
+       py -I fusion\nightloop.py --select list --mem-cap <that cap> --jobs 2
 
    (`--select list` reads only the designs `next_pass.py` listed in `_reextract.txt`. If `next_pass.py`
    said there is nothing to fetch, run the loop without `--select list` instead after moving one
@@ -102,16 +102,19 @@ converted on macOS, the grades should match; list every difference.
    afterwards): the loop then extracts that design. Either way at least one restart must happen.)
 
    Expected in `%USERPROFILE%\cad\work\_nightloop.log`: "starting Fusion", rounds that end with
-   `mem_stop` set, "quitting Fusion", Fusion started again by the loop, and at the end
-   `finished: nothing left to extract`. Also check that the loop refuses to start without an inventory
+   `mem_stop` set, "quitting Fusion", Fusion started again by the loop, `finished: nothing left to
+   extract`, then the loop translates and runs `next_pass.py` by itself ("translating", "next_pass",
+   their output in `_nightloop-translate-1.log` and `_nightloop-next-pass-1.log`) and either fetches
+   another pass or ends with `done: the translator needs nothing more from Fusion`. Also check that the loop refuses to start without an inventory
    (rename `inventory.json` for a moment and run it: it must stop with "run InventoryHub first" and not
    start Fusion).
-4. Run step 5 again and compare the grades with the first conversion.
+4. Compare the grades in `rebuild-report.json` (the loop's last translation) with the first
+   conversion.
 
 Report: whether the loop found Fusion's launcher by itself (if not, the path that works, set as
 `FUSION_LAUNCHER`), whether it found the process (`Fusion360.exe` or another name: `FUSION_PROCESS`),
 whether quitting asked any question on screen, how many rounds and restarts, the memory values in the
-log, and the end line.
+log, how many passes, and the end line.
 
 ## 7. Report
 

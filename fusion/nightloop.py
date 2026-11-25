@@ -8,6 +8,16 @@ Options:                  --mem-cap GB   Fusion memory at which a round stops an
                                          machine with less RAM)
                           --select list  read only the designs in _reextract.txt (a pass of step 5);
                                          default: every design of the inventory (step 3)
+                          --jobs N       translator jobs between passes (default 4)
+                          --max-passes N extraction passes at most (default 8)
+                          --extract-only stop when nothing is left to extract (step 3 only)
+
+By default the loop goes on to the end (steps 3 to 5): when nothing is left to extract it quits
+Fusion, runs the translator (timeline_to_solidcraft.py --all --verify into ~/cad/fusion-rebuild)
+and next_pass.py, and if the translator asked for states that are not on disk yet, it starts the
+next extraction pass with them. It ends when next_pass.py says nothing new is needed, when a pass
+asked for exactly the same states as the one before (Fusion could not give them), or after
+--max-passes.
 
 Work left is counted from files, the same way ExtractTimeline decides what to read: a design of the
 inventory (or of the list) without a .timeline.json yet, a file with states pending, and wanted
@@ -38,6 +48,8 @@ WIN_PROCESS = os.environ.get("FUSION_PROCESS", "Fusion360.exe")     # Windows pr
 MAX_ROUNDS = 30
 HARD_CAP_GB = 70.0        # if the script's own guard (40 GB) should fail: end Fusion from outside
 LOG = os.path.join(WORK, "_nightloop.log")
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REBUILD = os.path.expanduser("~/cad/fusion-rebuild")
 SETTINGS = {}             # passed to ExtractTimeline through the add-in (see --mem-cap)
 
 
@@ -260,29 +272,9 @@ def one_round(n):
         return json.load(fh)
 
 
-def main():
-    global HARD_CAP_GB
-    os.makedirs(WORK, exist_ok=True)
-    import argparse
-    ap = argparse.ArgumentParser(description="Runs ExtractTimeline rounds unattended (see the top of this file).")
-    ap.add_argument("--mem-cap", type=float, metavar="GB",
-                    help="Fusion memory at which a round stops and Fusion is restarted (default 40)")
-    ap.add_argument("--select", choices=("all", "list"), default="all",
-                    help="list: only the designs in _reextract.txt (a step 5 pass); all: the whole inventory")
-    a = ap.parse_args()
-    SETTINGS["SELECT"] = a.select
-    if a.mem_cap:
-        SETTINGS.update(MEM_CAP_GB=a.mem_cap, MEM_START_GB=round(a.mem_cap * 0.8, 1))
-        HARD_CAP_GB = max(a.mem_cap * 1.75, a.mem_cap + 4)
-        say("memory cap %.1f GB (no new design above %.1f GB, hard cap %.1f GB)"
-            % (a.mem_cap, SETTINGS["MEM_START_GB"], HARD_CAP_GB))
+def extract():
+    """ExtractTimeline rounds until nothing is left. 0: done, 1: stopped (see the log)."""
     left, pending = open_designs()
-    if SETTINGS["SELECT"] == "list" and not scope():
-        say("--select list, but %s is missing or empty: run next_pass.py first" % SELECT_LIST)
-        return 1
-    if scope() is None and not os.path.exists(WANTED):
-        say("no inventory (%s) and no wanted list: run InventoryHub first" % INVENTORY)
-        return 1
     say("start (SELECT %s): %d designs open, about %d states to write" % (SETTINGS["SELECT"], left, pending))
     stuck = 0
     for n in range(1, MAX_ROUNDS + 1):
@@ -306,7 +298,96 @@ def main():
             return 1
         if left:
             quit_fusion()
-    say("finished: nothing left to extract." if left == 0 else "stopped after %d rounds." % MAX_ROUNDS)
+    if left:
+        say("stopped after %d rounds." % MAX_ROUNDS)
+        return 1
+    say("finished: nothing left to extract.")
+    return 0
+
+
+def step(name, cmd, log):
+    """Runs a step of the toolkit outside Fusion, its output into log. Returns (exit code, its lines)."""
+    home = os.path.expanduser("~")
+    say("%s: %s" % (name, " ".join([os.path.basename(cmd[1])] + [c.replace(home, "~") for c in cmd[2:]])))
+    began = time.time()
+    with open(log, "w", encoding="utf-8") as fh:
+        rc = subprocess.call(cmd, stdout=fh, stderr=subprocess.STDOUT, cwd=REPO)
+    with open(log, encoding="utf-8", errors="replace") as fh:
+        tail = [ln.rstrip() for ln in fh if ln.strip()]
+    say("%s ended (exit %d, %d min), output in %s" % (name, rc, (time.time() - began) // 60, log))
+    return rc, tail
+
+
+def translate_and_plan(jobs, n):
+    """Steps 4 and 5. Returns True if next_pass.py wrote new states to fetch."""
+    rc, tail = step("translating", [sys.executable, os.path.join(REPO, "timeline_to_solidcraft.py"),
+                                     OUT, "--all", "--verify", "--outdir", REBUILD, "--jobs", str(jobs)],
+                    os.path.join(WORK, "_nightloop-translate-%d.log" % n))
+    for ln in tail:
+        if "faithful" in ln or "matching" in ln or "translated (" in ln:
+            say("  " + ln.strip())
+    if rc:
+        say("the translator failed: " + (tail[-1] if tail else "no output") + ". Stopping.")
+        return None
+    rc, tail = step("next_pass", [sys.executable, os.path.join(REPO, "next_pass.py")],
+                    os.path.join(WORK, "_nightloop-next-pass-%d.log" % n))
+    for ln in tail:
+        if ln.startswith(("translator asked", "  already on disk", "next pass:", "nothing new")):
+            say("  " + ln.strip())
+    if rc:
+        say("next_pass.py failed: " + (tail[-1] if tail else "no output") + ". Stopping.")
+        return None
+    return not any(ln.startswith("nothing new") for ln in tail)
+
+
+def main():
+    global HARD_CAP_GB
+    os.makedirs(WORK, exist_ok=True)
+    import argparse
+    ap = argparse.ArgumentParser(description="Runs ExtractTimeline rounds unattended (see the top of this file).")
+    ap.add_argument("--mem-cap", type=float, metavar="GB",
+                    help="Fusion memory at which a round stops and Fusion is restarted (default 40)")
+    ap.add_argument("--select", choices=("all", "list"), default="all",
+                    help="list: only the designs in _reextract.txt (a step 5 pass); all: the whole inventory")
+    ap.add_argument("--jobs", type=int, default=4, help="translator jobs between passes (default 4)")
+    ap.add_argument("--max-passes", type=int, default=8, help="extraction passes at most (default 8)")
+    ap.add_argument("--extract-only", action="store_true",
+                    help="stop when nothing is left to extract; translate and plan by hand")
+    a = ap.parse_args()
+    SETTINGS["SELECT"] = a.select
+    if a.mem_cap:
+        SETTINGS.update(MEM_CAP_GB=a.mem_cap, MEM_START_GB=round(a.mem_cap * 0.8, 1))
+        HARD_CAP_GB = max(a.mem_cap * 1.75, a.mem_cap + 4)
+        say("memory cap %.1f GB (no new design above %.1f GB, hard cap %.1f GB)"
+            % (a.mem_cap, SETTINGS["MEM_START_GB"], HARD_CAP_GB))
+    if SETTINGS["SELECT"] == "list" and not scope():
+        say("--select list, but %s is missing or empty: run next_pass.py first" % SELECT_LIST)
+        return 1
+    if scope() is None and not os.path.exists(WANTED):
+        say("no inventory (%s) and no wanted list: run InventoryHub first" % INVENTORY)
+        return 1
+    last_plan = None
+    for n in range(1, a.max_passes + 1):
+        if extract():
+            return 1
+        if a.extract_only:
+            say("next: translate (timeline_to_solidcraft.py --all --verify), then next_pass.py")
+            return 0
+        quit_fusion()                            # the translator gets the memory
+        more = translate_and_plan(a.jobs, n)
+        if more is None:
+            return 1
+        if not more:
+            say("done: the translator needs nothing more from Fusion. Results in %s" % REBUILD)
+            return 0
+        plan = _json(WANTED, {})
+        if plan == last_plan:
+            say("the translator asked for the same states again (Fusion did not give them). Stopping.")
+            return 1
+        last_plan = plan
+        SETTINGS["SELECT"] = "list"              # next pass: only the designs next_pass.py listed
+        say("pass %d: fetching the states the translator asked for" % (n + 1))
+    say("stopped after %d passes; run it again to go on." % a.max_passes)
     return 0
 
 
