@@ -61,7 +61,12 @@ def say(*a):
 
 
 def run(cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
+    # 25 Nov: quitting a Fusion at 43 GB took about 3 minutes; osascript's 60 s timeout raised and
+    # ended the loop. A command that runs out of time now just returns; the caller looks again.
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw)
+    except subprocess.TimeoutExpired as e:
+        return subprocess.CompletedProcess(cmd, None, e.stdout or "", e.stderr or "")
 
 
 def pid():
@@ -224,7 +229,7 @@ def quit_fusion():
         end(p)                                # asks the window to close, like the close button
     else:
         run(["osascript", "-e", 'tell application "%s" to quit' % APP], timeout=60)
-    for how, wait in ((None, 90), ("term", 30), ("kill", 90)):
+    for how, wait in ((None, 300), ("term", 60), ("kill", 90)):     # a big Fusion needs minutes to quit
         if how:
             say("Fusion still there, ending it:", how)
             end(p, force=(how == "kill" or WINDOWS))
