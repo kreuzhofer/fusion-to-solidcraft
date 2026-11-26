@@ -187,9 +187,11 @@ def open_designs():
             left += 1
             pending += len(wanted.get(key) or [])
             continue
-        # the same test as ExtractTimeline's states_missing: wanted steps without a frozen state
+        # the same test as ExtractTimeline's states_missing (has_state): wanted steps without a
+        # state; a base feature's state is written without the `frozen` flag (26 Nov)
         have = {r.get("index") for r in d.get("timeline") or []
-                if isinstance(r.get("state_step"), dict) and r["state_step"].get("frozen")}
+                if isinstance(r.get("state_step"), dict)
+                and (r["state_step"].get("frozen") or (r["state_step"].get("file") and not r["state_step"].get("error")))}
         missing = set(int(i) for i in wanted.get(key) or []) - have
         if d.get("states_pending") or missing:
             left += 1

@@ -1224,12 +1224,20 @@ def still_current(seen):
     return True
 
 
+def has_state(st):
+    """True if a step's `state_step` record holds its state: frozen (wanted states, mesh bases) or
+    written after a base or derive feature, which carries no `frozen` flag.
+
+    Crosslink 2026-11-26: only `frozen` counted, so a base step on the wanted list (next_pass.py
+    lists every state on disk) looked missing forever and its design was read again every round."""
+    return isinstance(st, dict) and bool(st.get("frozen") or (st.get("file") and not st.get("error")))
+
+
 def frozen_steps(seen):
-    """Indexes of the steps whose state an earlier read froze, mesh bases included (any schema)."""
+    """Indexes of the steps whose state an earlier read wrote, mesh bases included (any schema)."""
     out = set()
     for r in (seen or {}).get("timeline") or []:
-        st = r.get("state_step")
-        if isinstance(st, dict) and st.get("frozen") and r.get("index") is not None:
+        if has_state(r.get("state_step")) and r.get("index") is not None:
             out.add(r["index"])
     return out
 
