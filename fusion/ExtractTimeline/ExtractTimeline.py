@@ -1175,7 +1175,8 @@ def old_states(dest):
         folder = os.path.dirname(dest)
         for r in d.get("timeline") or []:
             st = r.get("state_step")
-            if (isinstance(st, dict) and st.get("frozen") and st.get("file") and not st.get("error")
+            # Crosslink 2026-11-27: base-feature states too (they carry no `frozen` flag)
+            if (has_state(st) and st.get("file") and not st.get("error")
                     and os.path.exists(os.path.join(folder, st["file"]))):
                 got[r.get("index")] = (r.get("name"), st)
     except Exception:
@@ -3028,8 +3029,16 @@ def describe_design(design, data_file, parts):
                         out["base"]["mesh_base"] = True
                         t["export"] = round(time.time() - t0, 2)
                     elif kind in ("BaseFeature", "DeriveFeature"):
-                        out["base"] = export_state_step(design, i, ent, keys)
-                        t["export"] = round(time.time() - t0, 2)
+                        # Crosslink 2026-11-27: a design visited again for more wanted states wrote
+                        # all its base states again on every visit (100 per visit for one design).
+                        # Same version, same step: the file on disk is that state.
+                        had = _CHUNK["old"].get(i)
+                        if had and had[0] == rec.get("name") and _CHUNK.get("same_version"):
+                            out["base"] = dict(had[1], reused=True)
+                            _CHUNK["reused"] += 1
+                        else:
+                            out["base"] = export_state_step(design, i, ent, keys)
+                            t["export"] = round(time.time() - t0, 2)
                     elif i in wanted:
                         had = _CHUNK["old"].get(i)
                         if keys and had and had[0] == rec.get("name"):
@@ -3502,6 +3511,11 @@ def run(context):
                         data_file.name, planned.versionNumber, get(data_file, "versionNumber")))
                 _DEST["base"] = dest[: -len(".timeline.json")]
                 _CHUNK["old"] = old_states(dest)
+                try:
+                    with open(dest, encoding="utf-8") as fh:
+                        _CHUNK["same_version"] = json.load(fh).get("version") == get(data_file, "versionNumber")
+                except Exception:
+                    _CHUNK["same_version"] = False
                 # Crosslink 2026-11-22: a design read again keeps the states it had. They were
                 # asked for by an earlier wanted list that may no longer name the design; without
                 # this a re-read dropped them and the rebuild lost its frozen steps.
