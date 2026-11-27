@@ -96,6 +96,7 @@ Which designs are read:
 - Bodies end up in the components Fusion had them in, with Fusion's body names.
 - Writes `state-wanted.json` (what the next extraction should fetch) after every run.
 - `--jobs`, `--verify-timeout` and an automatic second try of designs that ran out of time.
+- A later run builds only designs whose input changed since the last one (`--full` builds all).
 
 ## Known SolidCraft import limits seen along the way
 

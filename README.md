@@ -238,6 +238,10 @@ to it the translator saves `<design>.geometry.sc`: Fusion's complete final state
 without history but with the exact shape. `geometry_sc` in the coverage file says how close
 SolidCraft measures it (`matches`). When a later run gets the design right, the geometry file goes.
 
+A later run into the same `--outdir` builds only designs whose input changed since the last run (their
+`.timeline.json`, state and mesh files, or export); the others are taken from the last report and marked
+`(unchanged)`. A new translator, engine or option builds everything again; `--full` does so by hand.
+
 Each build check has 300 s (`--verify-timeout`). Under heavy load large designs can run out of it.
 At the end of the run the translator builds those again, one at a time and with twice the time;
 they are marked `(built alone)` in the output and `retried_alone` in the report. A design that still

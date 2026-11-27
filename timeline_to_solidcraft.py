@@ -16,6 +16,8 @@ quietly: a half-migrated part that claims to be whole is worse than one that adm
 
 import argparse
 import collections
+import glob
+import hashlib
 import math
 import json
 import re
@@ -3072,6 +3074,65 @@ def one(path, out_path, cli, do_verify, with_constraints=False, export_step=None
     return report
 
 
+def run_fingerprint(args):
+    """What every result of a run depends on besides the design's own files."""
+    def stamp(path):
+        try:
+            st = os.stat(path)
+            return [int(st.st_mtime), st.st_size]
+        except OSError:
+            return None
+    with open(os.path.abspath(__file__), "rb") as fh:
+        translator = hashlib.sha256(fh.read()).hexdigest()
+    return {"translator": translator, "cli": stamp(args.cli), "verify": bool(args.verify),
+            "constraints": bool(args.constraints), "against": os.path.abspath(args.against)}
+
+
+def unchanged_results(args, root, files, run_meta):
+    """{relative timeline path: last run's result} for designs whose input did not change.
+
+    A design counts as unchanged when the last run's report in args.outdir has it, its script is
+    still there, and none of its files (the .timeline.json, every `<design>.*` file next to it:
+    state and mesh files, and its export `<against>/<design>.step`) was written after that run
+    began. Everything else the result depends on (this file, the engine, the options) must be the
+    same too, or nothing is reused. A report from before 27 Nov has no `run` record: then its own
+    time stands in for the start, and this file and the engine must be older than it."""
+    path = os.path.join(args.outdir, "rebuild-report.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        written = os.path.getmtime(path)
+    except (OSError, ValueError):
+        return {}
+    meta = data.get("run")
+    if meta:
+        if any(meta.get(k) != v for k, v in run_meta.items()):
+            print("the last run in {} used another translator, engine or options: building all"
+                  .format(args.outdir), flush=True)
+            return {}
+        since = meta.get("started") or written
+    else:
+        newer = [p for p in (os.path.abspath(__file__), args.cli)
+                 if os.path.exists(p) and os.path.getmtime(p) > written]
+        if newer or not args.verify:
+            return {}
+        since = written
+    old = {r.get("stem"): r for r in data.get("designs") or [] if r.get("stem")}
+    out = {}
+    for f in files:
+        rel = os.path.relpath(f, root).replace("\\", "/")
+        stem = rel[: -len(".timeline.json")]
+        r = old.get(stem)
+        if r is None or not os.path.exists(os.path.join(args.outdir, stem + ".json")):
+            continue
+        base = f[: -len(".timeline.json")]
+        mine = [f] + glob.glob(glob.escape(base) + ".*") + [os.path.join(args.against, stem + ".step")]
+        if any(os.path.exists(p) and os.path.getmtime(p) > since for p in mine):
+            continue
+        out[rel] = r
+    return out
+
+
 def main():
     global LOCKSTEP_TIMEOUT_S, VERIFY_TIMEOUT_S
     ap = argparse.ArgumentParser()
@@ -3094,6 +3155,9 @@ def main():
                          "(default %(default)s). Raise it for big assemblies or a slow machine.")
     ap.add_argument("--no-retry", action="store_true",
                     help="with --all: do not try designs that timed out again one at a time")
+    ap.add_argument("--full", action="store_true",
+                    help="with --all: build every design, also those whose input did not change "
+                         "since the last run in --outdir")
     args = ap.parse_args()
 
     LOCKSTEP_TIMEOUT_S = VERIFY_TIMEOUT_S = max(1, args.verify_timeout)
@@ -3131,6 +3195,16 @@ def main():
                   .format(args.against))
 
         reports = []
+        started = time.time()
+        # Crosslink 2026-11-27: a design whose input did not change since the last run in this
+        # outdir (its .timeline.json, its state and mesh files, its export) builds exactly the same,
+        # so its result is taken from that run's report. After a pass that fetched states for 8
+        # designs this is minutes instead of hours. --full builds everything.
+        run_meta = run_fingerprint(args)
+        previous = {} if args.full else unchanged_results(args, root, files, run_meta)
+        if previous:
+            print("{} of {} designs unchanged since the last run: taken from its report "
+                  "(--full builds them again)\n".format(len(previous), len(files)), flush=True)
 
         def work(f):
             rel = os.path.relpath(f, root).replace("\\", "/")
@@ -3154,8 +3228,14 @@ def main():
 
         # Crosslink: the time goes into the engine's own processes, so threads are enough.
         from concurrent.futures import ThreadPoolExecutor
+        def work_or_reuse(f):
+            rel = os.path.relpath(f, root).replace("\\", "/")
+            if rel in previous:
+                return rel, rel[: -len(".timeline.json")], previous[rel], None
+            return work(f)
+
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-            results = list(pool.map(work, files))
+            results = list(pool.map(work_or_reuse, files))
 
         # Crosslink 2026-11-21: a build that runs out of time under load (several jobs, a busy
         # machine) usually finishes when the design is built alone. Try those designs again one
@@ -3163,7 +3243,7 @@ def main():
         def timed_out(r):
             return r is not None and ((r.get("verify") or {}).get("error") == "timeout"
                                       or any(s.get("reason") == "timeout" for s in r.get("steps") or []))
-        again = [k for k, (_rel, _stem, r, _e) in enumerate(results) if timed_out(r)]
+        again = [k for k, (rel, _stem, r, _e) in enumerate(results) if timed_out(r) and rel not in previous]
         if again and args.verify and not args.no_retry:
             LOCKSTEP_TIMEOUT_S = VERIFY_TIMEOUT_S = 2 * VERIFY_TIMEOUT_S
             print("{} design(s) ran out of time; trying them again one at a time ({} s per build)"
@@ -3206,12 +3286,14 @@ def main():
                     vs = " | TIMED OUT (raise --verify-timeout)"
                 if r.get("retried_alone"):
                     vs += " (built alone)" if r["retried_alone"] is True else " (alone too)"
+                if rel in previous:
+                    vs += " (unchanged)"
             print("{:>5.0%}  {:>3}/{:<3} steps  {}{}".format(
                 r["coverage"], r["steps_translated"], r["steps_total"], stem[:48], vs))
 
         os.makedirs(args.outdir, exist_ok=True)
         with open(os.path.join(args.outdir, "rebuild-report.json"), "w", encoding="utf-8") as fh:
-            json.dump({"designs": reports}, fh, indent=2)
+            json.dump({"run": dict(run_meta, started=started, jobs=args.jobs), "designs": reports}, fh, indent=2)
 
         # Crosslink 2026-11-15 (evening): what to ask Fusion for in the next extraction. Every
         # step that was not translated, did not build or built something else, and from the
@@ -3257,7 +3339,7 @@ def main():
                       "with history ({} of them match Fusion's volume)".format(
                           len(geo), sum(1 for r in geo if r["geometry_sc"].get("matches"))))
 
-        alone = [r for r in reports if r.get("retried_alone")]
+        alone = [r for r in reports if r.get("retried_alone") and r.get("stem", "") + ".timeline.json" not in previous]
         if alone:
             still = [r for r in alone if r["retried_alone"] is not True]
             print("\n{} design(s) ran out of time with {} jobs and were built again alone{}".format(
